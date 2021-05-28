@@ -37,8 +37,10 @@ def bake_udim(context):
 
     data = bpy.data
     images = data.images
+
     mat = obj.active_material
     nodes = mat.node_tree.nodes
+
     if nodes.active.type == 'TEX_IMAGE':
         if nodes.active.image.source == 'TILED':
             udim_node = nodes.active
@@ -53,51 +55,57 @@ def bake_udim(context):
             for t in udim.tiles:
                 udim_list.append(t.number)
 
-            for n in udim_list:
+            added_nodes = []
+            bake = images.new("bake", udim.size[0], udim.size[1], alpha=False, float_buffer=udim.is_float,
+                              stereo3d=False, is_data=False, tiled=False)
+            for one_mat in obj.data.materials:
+                one_nodes = one_mat.node_tree.nodes
+                bake_node = one_nodes.new("ShaderNodeTexImage")
+                bake_node.name = "bake_image"
+                one_nodes.active = bake_node
+                bake_node.image = bake
+                bake_node.select = True
+                one_nodes.active = bake_node
+                added_nodes.append((one_nodes, bake_node))
 
-                v = (n - 1001) // 10
-                u = n - 1001 - v * 10
+            try:
+                for n in udim_list:
 
-                if obj.mode != 'EDIT':
-                    bpy.ops.object.editmode_toggle()
-
-                    uv_traslate(obj, u, v)
-
-                bake_node = None
-                bake = None
-                try:
-                    if obj.mode == 'EDIT':
-                        bpy.ops.object.editmode_toggle()
-                    bake = images.new("bake", udim.size[0], udim.size[1], alpha=False, float_buffer=udim.is_float,
-                                      stereo3d=False, is_data=False, tiled=False)
-                    bake_node = nodes.new("ShaderNodeTexImage")
-                    bake_node.name = "bake_image"
-                    bake_node.image = bake
-                    nodes.active = bake_node
-                    bake_node.select = True
-
-                    filepath = udim_dir + '/' + udim_name + '.' + str(n) + "." + ext
-                    print(filepath)
-                    bake.filepath = filepath
-
-                    bake_type = bpy.context.scene.cycles.bake_type
-                    bpy.ops.object.bake(type=bake_type, filepath=filepath, save_mode='EXTERNAL')
-
-                    bake.save()
-
-                finally:
-                    if bake_node is not None:
-                        nodes.remove(bake_node)
-                    if bake is not None:
-                        images.remove(bake)
+                    v = (n - 1001) // 10
+                    u = n - 1001 - v * 10
 
                     if obj.mode != 'EDIT':
                         bpy.ops.object.editmode_toggle()
 
-                        uv_traslate(obj, -u, -v)
+                        uv_traslate(obj, u, v)
 
-                    if obj.mode == 'EDIT':
-                        bpy.ops.object.editmode_toggle()
+                    try:
+                        if obj.mode == 'EDIT':
+                            bpy.ops.object.editmode_toggle()
+
+                        filepath = udim_dir + '/' + udim_name + '.' + str(n) + "." + ext
+                        print(filepath)
+                        bake.filepath = filepath
+
+                        bake_type = bpy.context.scene.cycles.bake_type
+                        bpy.ops.object.bake(type=bake_type, filepath=filepath, save_mode='EXTERNAL')
+
+                        bake.save()
+
+                    finally:
+                        if obj.mode != 'EDIT':
+                            bpy.ops.object.editmode_toggle()
+
+                            uv_traslate(obj, -u, -v)
+
+                        if obj.mode == 'EDIT':
+                            bpy.ops.object.editmode_toggle()
+            finally:
+                for bake_node in added_nodes:
+                    bake_node[0].remove(bake_node[1])
+
+                if bake is not None:
+                    images.remove(bake)
 
             nodes.active = udim_node
             udim.reload()
@@ -114,7 +122,10 @@ class SCENE_OT_Bake_Udim(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.active_object is not None
+        if context.active_object is None or context.active_object.active_material is None:
+            return False
+        nodes = context.active_object.active_material.nodes
+        return nodes.active.type == 'TEX_IMAGE' and nodes.active.image.source == 'TILED'
 
     def execute(self, context):
         bake_udim(bpy.context)
